@@ -1,0 +1,248 @@
+---
+title: "Web Scraping Workshop Introduction"
+author: "Taylor Guthrie and Stephan Bartz"
+date: "May 10, 2018"
+output: 
+  html_document: 
+    highlight: tango
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+
+```{r, chunk_options, message = FALSE, error = FALSE, warning = FALSE, echo = FALSE}
+knitr::opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+```
+
+#Introduction
+This presentation is designed to give a cursory overview of the methods involved in extracting data from the web. Web scraping, also known as web crawling or web harvesting, is a technique used to obtain information from a website that is not available in a downloadable form. This is a topic that is unlike any that we have covered so far it in that it requires the use of tools outside of R and R studio and also requires a cursory knowledge of how information on the web is stored. In order to access the text or images of a website, we must dig through the underlying html code that serves as the scaffold of the website and pull out the bits and pieces that we need.  
+
+We will first explore the tools included in the ‘rvest’ package that will allow us to navigate the messy structure of the web. This will be followed by a surface level tutorial of how html code is structured and discuss the ways in which we can use tools such as developer tools, search functions, and web browser extensions to navigate through the code and find what we need. We will then go through two working examples that show different perspectives and techniques that can both achieve similar results. 
+
+
+#Disclaimer!
+Some websites don’t approve of web scraping and have systems in place that identify the difference between a user accessing the website through a point and click interface and a program that is designed to access the page solely to pull information from it. Facebook for example has been known to ban people from using facebook for scraping data. Google also has safeguards in place to prevent scraping as well. Make sure you research the guidelines that are in place for a particular site before trying to extract data from it. 
+
+#HTML and CSS selectors
+A css selector is a tag that is used to identify the information within the html code that you need. You rarely want to just pull one number or bit of text from a site or else you would just copy and paste it. The data that you want is often structured in repetitive ways through the use of “tags” and “class” identifiers (to name a few) that allow you to pull all data that has certain qualities in common. 
+ 
+This is a website that is highly recommended by Hadley Wickham for understanding how css selectors work.
+
+flukeout.github.io (demo)
+
+[Selector Gadget](http://selectorgadget.com/)
+
+The developer tools in the Google Chrome browser can also be incredibly helpful to identify relevant CSS tags.
+
+#rvest
+
+`html(x)` or `read_html(x)`
+
+Takes a url as its input and parses the html code that is associated with that site. Note that `html()` is deprecated. 
+
+`html_nodes(x, css, xpath)`
+
+Turns each HTML tag into a row in an R dataframe.
+Takes parsed html code as an input and requires either a css selector or an xpath as an argument. This is how you tell R what you want to pull from the website that you have identified with html() or read_html(). Css selectors will be explained below and xpath will not be explained here because it is used for xml.
+
+`html_text(x)`
+
+Takes a HTML tags, derived from html_nodes(),  as a parameter and extracts text from the corresponding tag(s).
+
+```{r}
+# Store web url
+library(rvest)
+kingdom <- read_html("http://www.imdb.com/title/tt0320661/")
+
+#Scrape the website for the movie rating
+rating <- kingdom %>% 
+  html_nodes("strong span") %>%
+  html_text() 
+rating
+```
+
+`html_attrs()`
+
+Takes a node or nodes as a parameter and extracts the attributes from them. Can be useful for debugging.
+
+```{r}
+#html_attrs() instead of html_text()
+rating <- kingdom %>% 
+  html_nodes("strong span") %>%
+  html_attrs() 
+rating
+```
+
+`html_session()`
+
+Alternative to using html() or read_html(). This function essentially opens a live browser session that allows you to do things such as “clicking buttons” and using the back page and forward page options like you would if you were were actually browsing the internet. 
+
+`follow_link()`
+`jump_to()`
+`back()`
+`forward()`
+
+`html_table()`
+
+Scrape whole HTML tables of data as a dataframe
+
+```{r}
+s <- html_session("http://hadley.nz")
+s %>% jump_to("hadley-wickham.jpg") %>% back() %>% session_history()
+s %>% follow_link(css = "p a")
+```
+
+
+#Scraping Sports Data
+
+Sports data is a good proof of concept because there are lots of numbers to work with. We will start with week 1 of the regular season and scrape all of the NFL teams that played that week and then also pull the total and quarter scores for each of those teams. Using a for loop we will navigate page by page through each week of the season until we have the teams and scores for the entire season. The data will then take a bit of wrangling to get it into a usable form so we can perform some simple descriptive statistics on it.  
+
+```{r, nfl_scores}
+#Load packages
+library(rvest)
+library(tidyverse)
+
+#Establish the session with the url for the first page  
+link <- html_session("http://www.nfl.com/scores/2017/REG1")
+
+#create an iteration variable that represents the amount of pages you will need to access
+num_weeks <- 17
+
+#each week has a different amount of games and so I make empty lists to put the dataframes in for each page
+#I have one for the teams and total scores and one for the teams and the quarter scores 
+#It makes it easier to wrangle later on to do these separate 
+dfs1 <- list()
+dfs2 <- list()
+
+#Create a for loop to iterate through each page and to collect the data on each that you need
+for (i in 1:num_weeks) { 
+  
+  #collect all of the team names for each week
+  team <- link  %>% 
+    #identify the css selector that selects all team names
+    html_nodes(".team-name") %>%  
+    #parse the html into a usable form
+    html_text()
+  
+  #collect all of the total scores for each week
+  score <- link %>% 
+    #identify the css selector that selects all total scores
+    html_nodes(".team-data .total-score") %>%  
+    html_text() %>% 
+    as.numeric()
+  
+  #collect the scores for each quarter for each game for each week 
+  q1 <- link %>% 
+    html_nodes(".first-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q2 <- link %>% 
+    html_nodes(".second-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q3 <- link %>% 
+    html_nodes(".third-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q4 <- link %>% 
+    html_nodes(".fourth-qt") %>% 
+    html_text() %>% 
+    as.numeric
+  
+  #Create a dataframe that binds togther the team and the total score for each week
+  x <- as.data.frame(cbind(team, score))
+  #This allows you to keep the teams variable the same in each dataframe while creating a variable that identifies which week the score came from
+  colnames(x) <- c("teams", paste("scores_week", i, sep = "_"))
+  
+  #Same thing for a dataframe that combines teams and the quarter scores for each week
+  y <- as.data.frame(cbind(team, q1, q2, q3, q4))
+  #The "_" after the q is very helpful later on
+  colnames(y) <- c("teams", paste("q_1_week", i, sep = "_"), paste("q_2_week", i, sep = "_"), paste("q_3_week", i, sep = "_"), paste("q_4_week", i, sep = "_"))
+  
+  #assign a name to each dataframe that specifies which week it came from 
+  dfs1[[i]] <- x
+  dfs2[[i]] <- y
+  
+  #specify which page to stop on
+  if (i < num_weeks) {
+    #follow the link for the next page with the approprite css selector 
+    link <- link %>%
+      follow_link(css = ".active-week+ li .week-item")
+  }
+}
+
+#join all of the dataframes based on team name
+total <- left_join(dfs1[[1]], dfs1[[2]])
+
+for (i in 3:num_weeks) {
+  total <- left_join(total, dfs1[[i]])
+}
+
+quarters <- left_join(dfs2[[1]], dfs2[[2]])
+
+for (i in 3:num_weeks) {
+  quarters <- left_join(quarters, dfs2[[i]])
+}
+
+
+#put the dataframe into long format
+total_tidy <- total %>% 
+  gather(week, score, -1) %>% 
+  #split up the week variable so that all you have is a number
+  separate(week, c("dis", "dis2", "week"), sep = "_") %>% 
+  select(-starts_with("dis"))
+
+#do the same for the quarter score dataframes 
+q_tidy <- quarters %>%
+  gather(q, q_score, -1) %>% 
+  #this is why the "_" after the q earlier was important 
+  separate(q, c("dis", "quarter", "dis2", "week"), sep = "_") %>% 
+  select(-starts_with("dis"))
+
+#join the total and quarter dataframes
+full_tidy <- left_join(total_tidy, q_tidy)
+
+full_tidy$score <- as.numeric(full_tidy$score)
+full_tidy$q_score <- as.numeric(full_tidy$q_score)
+
+week <- full_tidy %>% 
+  group_by(week) %>% 
+  summarise(mean = mean(score, na.rm = TRUE))
+
+team_score <- full_tidy %>% 
+  group_by(teams) %>% 
+  summarise(mean = mean(score, na.rm = TRUE)) %>% 
+  arrange(desc(mean))
+team_score$teams <- factor(team_score$teams, levels = team_score$teams)
+
+q1_score <- full_tidy %>% 
+  filter(quarter == 1) %>% 
+  group_by(teams, quarter) %>% 
+  summarise(mean = mean(q_score, na.rm = TRUE)) %>% 
+  arrange(desc(mean))
+q1_score$teams <- factor(q1_score$teams, levels = q1_score$teams)
+
+q4_score <- full_tidy %>% 
+  filter(quarter == 4) %>% 
+  group_by(teams, quarter) %>% 
+  summarise(mean = mean(q_score, na.rm = TRUE)) %>% 
+  arrange(desc(mean))
+q4_score$teams <- factor(q4_score$teams, levels = q4_score$teams)
+
+ggplot(team_score, aes(x = teams, y = mean)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(q1_score, aes(x = teams, y = mean)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplot(q4_score, aes(x = teams, y = mean)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```

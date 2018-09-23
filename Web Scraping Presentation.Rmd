@@ -1,0 +1,647 @@
+---
+title: "Web Scraping Workshop Introduction"
+author: "Taylor Guthrie and Stephan Bartz"
+date: "May 10, 2018"
+output: 
+  html_document: 
+    highlight: tango
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+
+```{r, chunk_options, message = FALSE, error = FALSE, warning = FALSE, echo = FALSE}
+knitr::opts_chunk$set(message = FALSE, error = FALSE, warning = FALSE)
+```
+
+#Introduction
+This presentation is designed to give a cursory overview of the methods involved in extracting data from the web. Web scraping, also known as web crawling or web harvesting, is a technique used to obtain information from a website that is not available in a downloadable form. This is a topic that is unlike any that we have covered so far it in that it requires the use of tools outside of R and R studio and also requires a cursory knowledge of how information on the web is stored. In order to access the text or images of a website, we must dig through the underlying html code that serves as the scaffold of the website and pull out the bits and pieces that we need.  
+
+We will first explore the tools included in the ‘rvest’ package that will allow us to navigate the messy structure of the web. This will be followed by a surface level tutorial of how html code is structured and discuss the ways in which we can use tools such as developer tools, search functions, and web browser extensions to navigate through the code and find what we need. We will then go through two working examples that show different perspectives and techniques that can both achieve similar results. 
+
+
+#Disclaimer!
+Some websites don’t approve of web scraping and have systems in place that identify the difference between a user accessing the website through a point and click interface and a program that is designed to access the page solely to pull information from it. Facebook for example has been known to ban people from using facebook for scraping data. Google also has safeguards in place to prevent scraping as well. Make sure you research the guidelines that are in place for a particular site before trying to extract data from it. 
+
+#rvest
+
+`html(x)` or `read_html(x)`
+
+Takes a url as its input and parses the html code that is associated with that site. Note that `html()` is deprecated. 
+
+`html_nodes(x, css, xpath)`
+
+Turns each HTML tag into a row in an R dataframe.
+Takes parsed html code as an input and requires either a css selector or an xpath as an argument. This is how you tell R what you want to pull from the website that you have identified with html() or read_html(). Css selectors will be explained below and xpath will not be explained here because it is used for xml.
+
+`html_text(x)`
+
+Takes a HTML tags, derived from html_nodes(),  as a parameter and extracts text from the corresponding tag(s).
+
+```{r}
+# Store web url
+library(rvest)
+kingdom <- read_html("http://www.imdb.com/title/tt0320661/")
+
+#Scrape the website for the movie rating
+rating <- kingdom %>% 
+  html_nodes("strong span") %>%
+  html_text() 
+rating
+```
+
+`html_attrs()`
+
+Takes a node or nodes as a parameter and extracts the attributes from them. Can be useful for debugging.
+
+```{r}
+#html_attrs() instead of html_text()
+rating <- kingdom %>% 
+  html_nodes("strong span") %>%
+  html_attrs() 
+rating
+```
+
+`html_session()`
+
+Alternative to using html() or read_html(). This function essentially opens a live browser session that allows you to do things such as “clicking buttons” and using the back page and forward page options like you would if you were were actually browsing the internet. 
+
+`follow_link()`
+`jump_to()`
+`back()`
+`forward()`
+
+`html_table()`
+
+Scrape whole HTML tables of data as a dataframe
+
+```{r}
+s <- html_session("http://hadley.nz")
+s %>% jump_to("hadley-wickham.jpg") %>% back() %>% session_history()
+s %>% follow_link(css = "p a")
+```
+
+#HTML and CSS selectors
+A css selector is a tag that is used to identify the information within the html code that you need. You rarely want to just pull one number or bit of text from a site or else you would just copy and paste it. The data that you want is often structured in repetitive ways through the use of “tags” and “class” identifiers (to name a few) that allow you to pull all data that has certain qualities in common. 
+ 
+This is a website that is highly recommended by Hadley Wickham for understanding how css selectors work.
+
+flukeout.github.io (demo)
+
+[Selector Gadget](http://selectorgadget.com/)
+
+The developer tools in the Google Chrome browser can also be incredibly helpful to identify relevant CSS tags.
+
+#Scraping Sports Data
+
+Sports data is a good proof of concept because there are lots of numbers to work with. We will start with week 1 of the regular season and scrape all of the NFL teams that played that week and then also pull the total and quarter scores for each of those teams. Using a for loop we will navigate page by page through each week of the season until we have the teams and scores for the entire season. The data will then take a bit of wrangling to get it into a usable form so we can perform some simple descriptive statistics on it.  
+
+```{r, nfl_scores}
+#Load packages
+library(rvest)
+library(tidyverse)
+
+#Establish the session with the url for the first page  
+link <- html_session("http://www.nfl.com/scores/2017/REG1")
+
+#create an iteration variable that represents the amount of pages you will need to access
+num_weeks <- 17
+
+#each week has a different amount of games and so I make empty lists to put the dataframes in for each page
+#I have one for the teams and total scores and one for the teams and the quarter scores 
+#It makes it easier to wrangle later on to do these separate 
+dfs1 <- list()
+dfs2 <- list()
+
+#Create a for loop to iterate through each page and to collect the data on each that you need
+for (i in 1:num_weeks) { 
+  
+  #collect all of the team names for each week
+  team <- link  %>% 
+    #identify the css selector that selects all team names
+    html_nodes(".team-name") %>%  
+    #parse the html into a usable form
+    html_text()
+  
+  #collect all of the total scores for each week
+  score <- link %>% 
+    #identify the css selector that selects all total scores
+    html_nodes(".team-data .total-score") %>%  
+    html_text() %>% 
+    as.numeric()
+  
+  #collect the scores for each quarter for each game for each week 
+  q1 <- link %>% 
+    html_nodes(".first-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q2 <- link %>% 
+    html_nodes(".second-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q3 <- link %>% 
+    html_nodes(".third-qt") %>% 
+    html_text() %>% 
+    as.numeric
+
+  q4 <- link %>% 
+    html_nodes(".fourth-qt") %>% 
+    html_text() %>% 
+    as.numeric
+  
+  #Create a dataframe that binds togther the team and the total score for each week
+  x <- as.data.frame(cbind(team, score))
+  #This allows you to keep the teams variable the same in each dataframe while creating a variable that identifies which week the score came from
+  colnames(x) <- c("teams", paste("scores_week", i, sep = "_"))
+  
+  #Same thing for a dataframe that combines teams and the quarter scores for each week
+  y <- as.data.frame(cbind(team, q1, q2, q3, q4))
+  #The "_" after the q is very helpful later on
+  colnames(y) <- c("teams", paste("q_1_week", i, sep = "_"), paste("q_2_week", i, sep = "_"), paste("q_3_week", i, sep = "_"), paste("q_4_week", i, sep = "_"))
+  
+  #assign a name to each dataframe that specifies which week it came from 
+  dfs1[[i]] <- x
+  dfs2[[i]] <- y
+  
+  #specify which page to stop on
+  if (i < num_weeks) {
+    #follow the link for the next page with the approprite css selector 
+    link <- link %>%
+      follow_link(css = ".active-week+ li .week-item")
+  }
+}
+
+#join all of the dataframes based on team name
+total <- left_join(dfs1[[1]], dfs1[[2]])
+
+for (i in 3:num_weeks) {
+  total <- left_join(total, dfs1[[i]])
+}
+
+quarters <- left_join(dfs2[[1]], dfs2[[2]])
+
+for (i in 3:num_weeks) {
+  quarters <- left_join(quarters, dfs2[[i]])
+}
+
+
+#put the dataframe into long format
+total_tidy <- total %>% 
+  gather(week, score, -1) %>% 
+  #split up the week variable so that all you have is a number
+  separate(week, c("dis", "dis2", "week"), sep = "_") %>% 
+  select(-starts_with("dis"))
+
+#do the same for the quarter score dataframes 
+q_tidy <- quarters %>%
+  gather(q, q_score, -1) %>% 
+  #this is why the "_" after the q earlier was important 
+  separate(q, c("dis", "quarter", "dis2", "week"), sep = "_") %>% 
+  select(-starts_with("dis"))
+
+#join the total and quarter dataframes
+full_tidy <- left_join(total_tidy, q_tidy)
+
+full_tidy$score <- as.numeric(full_tidy$score)
+full_tidy$q_score <- as.numeric(full_tidy$q_score)
+
+week <- full_tidy %>% 
+  group_by(week) %>% 
+  summarise(mean = mean(score, na.rm = TRUE))
+
+team_score <- full_tidy %>% 
+  group_by(teams) %>% 
+  summarise(mean = mean(score, na.rm = TRUE))
+
+q_score <- full_tidy %>% 
+  group_by(teams, quarter) %>% 
+  summarise(mean = mean(q_score, na.rm = TRUE))
+```
+
+
+## Examining Trustpilot reviews
+#
+#```{r loading relevant packages, warning=FALSE, message=FALSE}
+#library(tidyverse)
+#library(rvest)
+#library(stringr)
+#library(lubridate)
+#library(rebus)
+#```
+#
+#
+#This example is adapted from a [Data Camp tutorial](https://www.datacamp.com/community/tutorials/r-web-scraping-rvest).
+#
+#Trustpilot has become a popular website for customers to review businesses and services. On the site, a review consists of a short description of the #service, a 5-star rating, a user name and the time the post was made.  By the end of this example we will have a function in R that will extract this #information for any company we choose.
+#
+#Let's use Amazon as an example company to scrape reviews from.
+#
+### Thinking before doing. 
+#
+#First, imagine what we might need if we wanted to collect all the Amazon reviews on Trustpilot. Our approach will heavily depend on the structure of the #Trustpilot website, so let's take a moment to see how it's formatted. With a general understanding of the way Trustpilot organizes their reviews, we can #write functions that take advantage of the structure. 
+#
+#If we're going to pull reviews, here are some things we might want to think about:
+#
+# - There are 20 reviews per web page.  How do we know how many pages to look through, and how are we going to go from page to page?
+# - A review has multiple components to it.  What information are we looking to pull? 
+# - How do we find the CSS tags that correspond to the desired information?
+#
+### Finding the last page of a review
+#
+#
+#```{r define url and html variables}
+#
+#url = 'http://www.trustpilot.com/review/www.amazon.com'
+#
+#htmlPage1 = read_html(url)
+#```
+#
+#Looking at the bottom of the first page of amazon reviews, we see that there are page numbers, and one of them is the last page of reviews! After some #digging around, we found that `.pagination-page` is the corresponding tag.
+#
+#```{r}
+#
+#(nodes = html_nodes(htmlPage1, '.pagination-page'))
+#
+#(htext = html_text(nodes))
+#```
+#
+#Notice that this isn't a list of all the pages, but it does include the last page we want. 
+#So now we can write a function "get_last_page" that returns the last page as a number from a given html.
+#\n ** remember that this will work for Trustpilot, but not necessarily other websites **
+#\n Writing the function:
+#
+#```{r get final page function}
+#
+#get_last_page = function(html){
+#
+#      pages_data = html %>% 
+#                      # The '.' indicates the class
+#                      html_nodes('.pagination-page') %>% 
+#                      # Extract the raw text as a list
+#                      html_text()                   
+#
+#      # The second to last of the buttons is the one
+#      pages_data[(length(pages_data)-1)] %>%            
+#        # Take the raw string
+#        unname() %>%                                     
+#        # Convert to number
+#        as.numeric()                                     
+#}
+#
+#
+## What calling the function returns
+#
+#(lastPageNumber = get_last_page(htmlPage1))
+#
+#```
+#
+#Now that we have a way to get the last page number, we can generate a list of all relevant URLs for a given review site. 
+#
+#```{r}
+##note: str_c() is from the stringr package
+#list_of_pages = str_c(url, '?page=', 1:lastPageNumber)
+#tail(list_of_pages)
+#```
+#
+#Again, this works because of the way Trustpilot is set up (taking advantage of the url structure of the given website).  
+#
+###Extracting Review Information from One page
+#
+#Now that we have a list of all the pages of reviews for a company, our next functions only have to scrape information for a given page.
+#\n
+#Suppose we want to extract four things: the review text, rating, name of the author of each review, and time of submission of each review for a given #subpage.  
+#
+#The most tedious part is determining the correct CSS tags you want to extract.
+#
+#### Review text body
+#
+#After some digging, we find that the review tag we want is 
+#
+#```{r Understanding the parts of the function}
+#
+#
+#nodes = html_nodes(htmlPage1, '.review-info__body__text')
+#head(nodes)
+#
+#htext = html_text(nodes)
+#head(htext)
+#
+#```
+#
+#
+#```{r get reviews function}
+#
+#get_reviews = function(html){
+#      html %>% 
+#        # The relevant tag
+#        html_nodes('.review-info__body__text') %>%      
+#        html_text() %>% 
+#        # Trim additional white space
+#        str_trim() %>%                       
+#        # Convert the list into a vector
+#        unlist()                             
+#}
+#
+##testing the function
+#reviews = get_reviews(htmlPage1)
+#head(reviews)
+#
+#```
+#
+#### Reviewer Names
+#
+# Once we determine the appropriate tag to call, this is the same function as the one above.
+#
+#```{r get reviewer names function}
+#get_reviewer_names = function(html){
+#      html %>% 
+#        html_nodes('.consumer-info__details__name') %>% 
+#        html_text() %>% 
+#        str_trim() %>% 
+#        unlist()
+#}
+#
+##sanity check
+#reviewer_names = get_reviewer_names(htmlPage1)
+#head(reviewer_names)
+#```
+#
+#
+#### Review Date Time
+#
+#Date time is going to be a bit trickier because it is stored as an attribute. We will also be using the `lubridate` package to convert some of the date #information.   Below is the completed function that returns the dates for reviews for a given page, then let’s walk through it to make sure we understand #how it works. 
+#
+#```{r}
+#get_review_dates = function(html){
+#
+#      status = html %>% 
+#                  html_nodes('time') %>% 
+#                  # The status information is this time a tag attribute
+#                  html_attrs() %>%             
+#                  # Extract the second element
+#                  map(2) %>%                    
+#                  unlist() 
+#
+#      dates = html %>% 
+#                  html_nodes('time') %>% 
+#                  html_attrs() %>% 
+#                  map(1) %>% 
+#                  # Parse the string into a datetime object with lubridate
+#                  ymd_hms() %>%                 
+#                  unlist()
+#
+#      # Combine the status and the date information to filter one via the other
+#      return_dates = tibble(status = status, dates = dates) %>%   
+#                        # Only these are actual reviews
+#                        filter(status == 'ndate') %>%              
+#                        # Select and convert to vector
+#                        pull(dates) %>%                            
+#                        # Convert DateTimes to POSIX objects
+#                        as.POSIXct(origin = '1970-01-01 00:00:00') 
+#
+#      # The lengths still occasionally do not line up. You then arbitrarily crop the dates to fit
+#      # This can cause data imperfections, however reviews on one page are generally close in time)
+#
+#      length_reviews = length(get_reviews(html))
+#
+#      return_reviews = if (length(return_dates)> length_reviews){
+#          return_dates[1:length_reviews]
+#        } else{
+#          return_dates
+#        }
+#      return_reviews
+#}
+#```
+#
+#Now let’s walk through what the function is doing, calling the data structures at each step so we know what the data looks like at each point along the #way.
+#
+#```{r examining first half of get_review_dates}
+#nodes = html_nodes(htmlPage1, 'time')
+#attributes = html_attrs(nodes)
+#head(attributes)
+#
+##status variable in getter function
+#(date_attribute_2 = unlist(map(attributes,2)))
+#
+##dates variable in getter function
+#(date_attribute_1 = unlist(ymd_hms(map(attributes, 1))))
+#
+#```
+#
+#Notice here that we are pulling 22 dates from 20 reviews. To help match them up, we only want the original date times (not updated ones), so we need to #return the dates associated with "ndate" and not "ndate updatedDate"
+#
+#```{r examining second half of get_review_dates}
+#
+#return_ndates = tibble(status = date_attribute_2, dates = date_attribute_1) %>% 
+#                        # filter for 'ndate'
+#                        filter(status == 'ndate') %>%              
+#                        # Select and convert to vector
+#                        pull(dates) %>%                            
+#                        # Convert DateTimes to POSIX objects
+#                        as.POSIXct(origin = '1970-01-01 00:00:00')
+#
+#return_ndates
+#
+##testing get_review_dates 
+#(dates = get_review_dates(htmlPage1))
+#```
+#
+#### Reviewer Rating
+#
+#The final variable we want is the reviewer rating.  Looking at the source code, we see that the rating is placed as an attribute of the tag.  Instead of #being just a number (1,2,3,4,5), it's part of a string "count-X" where X is the desired number.  For this, we will use regular expressions for pattern #matching.  In particular, we will use the handy piping functionality in the rebus package, written as the %R% operator, which can decompose complex #patterns into simpler subpatterns.
+#\n
+#Again, here is the full function, and then we will walk through what the data structure looks like at each step of the way.
+#
+#```{r get_star_rating function}
+#
+#get_star_rating = function(html){
+#
+#      # The pattern you look for: the first digit after `count-`
+#      pattern = 'count-'%R% capture(DIGIT)    
+#
+#      ratings =  html %>% 
+#        html_nodes('.star-rating') %>% 
+#        html_attrs() %>% 
+#        # Apply the pattern match to all attributes
+#        map(str_match, pattern = pattern) %>%
+#        # str_match[1] is the fully matched string, the second entry
+#        # is the part you extract with the capture in your pattern  
+#        map(2) %>%                             
+#
+#        unlist()
+#
+#      # Leave out the first instance, as it is not part of a review
+#      ratings[2:length(ratings)]               
+#    }
+#```
+#
+#Walking through the above function:
+#
+#```{r examining get_star_rating function}
+#
+## The pattern we're looking for later on, of the form 'count-[X]'
+#
+#pattern = 'count-' %R% capture(DIGIT)
+#pattern
+#
+## just like before, we get the ratings attributes
+#
+#nodes = html_nodes(htmlPage1, '.star-rating')
+#ratings_attributes = html_attrs(nodes)
+#
+#head(ratings_attributes)
+#
+##applying pattern match to each attribute
+#
+#pattern_match = map(ratings_attributes, str_match, pattern = pattern) 
+#head(pattern_match)
+#
+##Only want second element of each
+#ratings = map(pattern_match, 2)
+#head(ratings)
+#
+##turn ratings into a vector.
+#
+#ratings = unlist(ratings)
+#head(ratings)
+#
+#length(ratings)
+##observe that the length of ratings is 21 for 20 ratings on the page.  The first star rating is not from a review, so we don't want that one.
+#
+#ratings_list = ratings[2:length(ratings)]
+#head(ratings_list)
+#
+##sanity check
+#getRatings = get_star_rating(htmlPage1)
+#head(getRatings)
+#```
+#
+###Combining our functions! 
+#
+#Now that we have tested that the individual extractor functions work on a single URL, we can combine them to create a tibble (basically a data frame) for #the whole page. Because we are likely to apply this function to more than one company, it's helpful to add a parameter for the company name. This is #especially helpful in later analysis should you want to compare different companies.
+#
+#```{r combining functions for a given html}
+#
+#get_data_table = function(html, company_name){
+#
+#      # Extract the Basic information from the HTML
+#      reviews = get_reviews(html)
+#      reviewer_names = get_reviewer_names(html)
+#      dates = get_review_dates(html)
+#      ratings = get_star_rating(html)
+#
+#      # Combine into a tibble
+#      combined_data = tibble(reviewer = reviewer_names,
+#                              date = dates,
+#                              rating = ratings,
+#                              review = reviews) 
+#
+#      # Tag the individual data with the company name
+#      combined_data %>% 
+#        mutate(company = company_name) %>% 
+#        select(company, reviewer, date, rating, review)
+#    }
+#```
+#
+#We then wrap this function in another basic function that takes the URL and company_name and extracts the required HTML
+#
+#```{r get data from url instead of html}
+#get_data_from_url = function(url, company_name){
+#      html = read_html(url)
+#      get_data_table(html, company_name)
+#    }
+#```
+#
+#Testing this function from our original URL for page 1 of Amazon Reviews
+#
+#```{r}
+#
+#url = 'http://www.trustpilot.com/review/www.amazon.com'
+#
+#amazon_data_page1 = get_data_from_url(url, 'amazon')
+#head(amazon_data_page1)
+#```
+#
+#Finally, we can write a simple function that will take as input the URL of the landing page of a company and the label we want to give the company. We #want the function to extract all reviews, binding them into one tibble, and writing them to a tsv. 
+#
+#Aside: This is also a good starting point for optimising the code. The map function applies the get_data_from_url() function in sequence, but it does not #have to. One could apply parallelisation here, such that several CPUs can each get the reviews for a subset of the pages and they are only combined at the #end.
+#
+#
+#```{r scrape function for Trustpilot}
+#scrape_write_table = function(url, company_name){
+#
+#      # Read first page
+#      first_page = read_html(url)
+#
+#      # Extract the number of pages that have to be queried
+#      latest_page_number = get_last_page(first_page)
+#
+#      # Generate the target URLs
+#      list_of_pages = str_c(url, '?page=', 1:latest_page_number)
+#
+#      # Apply the extraction and bind the individual results back into one table, 
+#      # which is then written as a tsv file into the working directory
+#      list_of_pages %>% 
+#        # Apply to all URLs
+#        map(get_data_from_url, company_name) %>%  
+#        # Combine the tibbles into one tibble
+#        bind_rows() %>%                           
+#        # Write a tab-separated file
+#        write_tsv(str_c(company_name,'.tsv'))     
+#    }
+#```
+#
+#So now if we wanted all Amazon reviews: 
+#
+#```{r}
+##scrape_write_table('https://www.trustpilot.com/review/wholefoodsmarket.com', 'whole-foods')
+##
+##apple_table = read_tsv('apple_sup.tsv')
+##head(apple_table)
+#```
+#
+#We can now scrape reviews from any company on Trustpilot by calling one line of code!
+#
+#
+##Minihacks
+#
+###Minihack 1
+#
+#Navigate to the nfl page that was used in the first example and pull the big plays count for each game. Once you have all of the data, report the mean and #the standard deviation.  *If you are feeling ambitious, create a for loop that does this for each week of the season and store each mean and sd in a list. #  
+#
+#
+#
+#
+#
+###Minihack 2
+#
+#Go back to the TrustPilot website and look at the reviews.  You’ll notice that there is information on each review about the number of reviews the author #has posted on the website (Ex: Joey Perry, 4 reviews).  Write a function that, for a given webpage,  gets the number of reviews each reviewer has made.  
+#
+#If you are having trouble finding the corresponding CSS tag, ask a classmate!  Note as well that only pulling the number of other reviews will involve #some text manipulation to get rid of irrelevant text.
+#
+#At the end you should have a function that takes an html object as a parameter and returns a numeric vector of length 20.  
+#
+#
+#
+#
+###Minihack 3
+#
+#The web is a vast ocean of data that is waiting to be scraped. For this hack, be creative. Find a website of your choice and pull some data that you find #interesting. Tidy your data and print the head of your dataframe. Perform some simple descriptive statistics and if you’re feeling ambitious create at #least one visualization of the trends that you have discovered. There are no limitations to what kind of data you decide to pull (but don’t forget our #initial disclaimer!). It can be numbers and it can also be text if you decide that you want to use the skills from the text processing lesson that we #covered last week. 
+#
+#If you don’t know where to start, scraping from imdb.com, espn.go.com, news sites, bestplaces.net,  is sufficient. 
+#
+#
+#
+#
+#
+#Helpful Sources:
+#
+#[Hadley Wickham’s rvest](http://blog.rstudio.com/2014/11/24/rvest-easy-web-scraping-with-r/)
+#
+#[RPubs Web Scraping Tutorial](https://rpubs.com/ryanthomas/webscraping-with-rvest)
+#
+#[CRAN Selectorgadget](https://cran.r-project.org/web/packages/rvest/vignettes/selectorgadget.html)
+#
